@@ -11,8 +11,12 @@ def parse_args():
         description="Unpack the EPUB file and fix endnotes section numbering."
     )
     parser.add_argument("filename", type=str, help="The EPUB source file to unpack")
-    parser.add_argument("--repack", "-r", action="store_true", help="repack only, useful for debugging")
-    parser.add_argument("--toc", "-t", action="store_true", help="modify toc only, useful for debugging")
+    parser.add_argument(
+        "--repack", "-r", action="store_true", help="repack only, useful for debugging"
+    )
+    parser.add_argument(
+        "--toc", "-t", action="store_true", help="modify toc only, useful for debugging"
+    )
     args = parser.parse_args()
     return args
 
@@ -51,7 +55,7 @@ def replace_end_ref_numbers(input_string):
     """
     Detects a string that ends with a series of numbers and removes the numbers.
     """
-    corrected_string = re.sub(r'\d+$', '', input_string)
+    corrected_string = re.sub(r"\d+$", "", input_string)
     return corrected_string
 
 
@@ -65,7 +69,7 @@ def remove_empty_frames(soup):
     for div in empty_frames:
         # If the div has no content (only whitespace), decompose it (remove it from the tree)
         if (
-            not div.text.strip() # and not div.contents # why does div.contents still return something? newline?
+            not div.text.strip()  # and not div.contents # why does div.contents still return something? newline?
         ):  # Check both text and other elements inside the div
             div.decompose()  # Remove the empty <div>
             count += 1
@@ -102,8 +106,25 @@ def repack_epub(folder_path, output_epub):
 
 
 CHAPTER_NUMBERS = [
-    "ONE", "TWO", "THREE", "FOUR", "FIVE", "SIX", "SEVEN", "EIGHT", "NINE", "TEN", "ELEVEN", "TWELVE", "THIRTEEN",
-    "FOURTEEN", "FIFTEEN", "SIXTEEN", "SEVENTEEN", "EIGHTEEN", "NINETEEN"
+    "ONE",
+    "TWO",
+    "THREE",
+    "FOUR",
+    "FIVE",
+    "SIX",
+    "SEVEN",
+    "EIGHT",
+    "NINE",
+    "TEN",
+    "ELEVEN",
+    "TWELVE",
+    "THIRTEEN",
+    "FOURTEEN",
+    "FIFTEEN",
+    "SIXTEEN",
+    "SEVENTEEN",
+    "EIGHTEEN",
+    "NINETEEN",
 ]
 
 
@@ -115,15 +136,16 @@ def __modify_toc_ncx(soup):
     # Check if the navMap element is found
     for navmap_element in soup.find_all("navmap"):
         # 2. Iterate over the <navPoint> elements inside the <ol>
-        for index, navpoint_element in enumerate(navmap_element.find_all("navpoint"), start=1):
+        for index, navpoint_element in enumerate(
+            navmap_element.find_all("navpoint"), start=1
+        ):
             # 3. For each <navPoint> element, change the text to include the chaptr number
             text_element = navpoint_element.find("text")
-            print(text_element.text)
             if text_element.text == "Endnotes":
                 found_endnotes = True
-                break # exit after finding endnotes.
+                break  # exit after finding endnotes.
             if text_element.text == "Darian":
-                found_chapter_one = True # start after finding darian (chapter one)
+                found_chapter_one = True  # start after finding darian (chapter one)
                 print("modify_toc: found chapter one")
             if found_chapter_one:
                 if count >= len(CHAPTER_NUMBERS):
@@ -155,12 +177,11 @@ def __modify_toc_xhtml(soup):
         for index, li_element in enumerate(ol_element.find_all("li"), start=1):
             # 3. For each <navPoint> element, change the text to include the chaptr number
             a_element = li_element.find("a")
-            print(a_element.text)
             if a_element.text == "Endnotes":
                 found_endnotes = True
-                break # exit after finding endnotes.
+                break  # exit after finding endnotes.
             if a_element.text == "Darian":
-                found_chapter_one = True # start after finding darian (chapter one)
+                found_chapter_one = True  # start after finding darian (chapter one)
                 print("modify_toc: found chapter one")
             if found_chapter_one:
                 if count >= len(CHAPTER_NUMBERS):
@@ -176,6 +197,46 @@ def __modify_toc_xhtml(soup):
         if found_endnotes:
             break
     print("__modify_toc_xhtml: " + str(count))
+
+
+def __modify_toc_content(soup):
+    count = 0
+    found_chapter_one = False
+    found_endnotes = False
+
+    # Check if the toc container element is found
+    for div_element in soup.find_all("div", {"epub:type": "toc"}):
+        print("found div")
+        # 2. Iterate over the <h1> elements inside the <div>
+        for index, h1_element in enumerate(div_element.find_all("h1"), start=1):
+            # 3. For each <h1> element, change the text to include the chaptr number
+            a_element = h1_element.find("a")
+            if not a_element:
+                continue
+            # sometimes the chapter title is inside a spasn
+            optional_span = a_element.find("span")
+            if optional_span:
+                a_element = optional_span
+            if a_element.text == "Endnotes":
+                found_endnotes = True
+                break  # exit after finding endnotes.
+            if a_element.text == "Darian":
+                found_chapter_one = True  # start after finding darian (chapter one)
+                print("__modify_toc_content: found chapter one")
+            if found_chapter_one:
+                if count >= len(CHAPTER_NUMBERS):
+                    print("ERROR: modify_toc iterated to chapter: " + str(count))
+                    break
+                # MODIFY the TOC chapter title to include numbers.
+                a_element.string = CHAPTER_NUMBERS[count] + " " + a_element.text
+                # NOTE: Eating for Two and Meeting his BFF have numbers at the end (endnote reference)
+                # we want these to show up in the book but not in the TOC section metadata.
+                # so we scrub it out here.
+                a_element.string = replace_end_ref_numbers(a_element.string)
+                count += 1
+        if found_endnotes:
+            break
+    print("__modify_toc_content: " + str(count))
 
 
 def modify_toc(folder_path):
@@ -195,6 +256,18 @@ def modify_toc(folder_path):
                 with open(toc_path, "w", encoding="utf-8") as f:
                     f.write(str(soup))
                 print("  " + toc_path)
+            else:
+                toc_path = os.path.join(root, file)
+                if toc_path.endswith("xhtml"):
+                    with open(toc_path, "r", encoding="utf-8") as f:
+                        soup = BeautifulSoup(f, "html.parser")
+
+                    __modify_toc_content(soup)
+
+                    # Write changes back to the TOC file
+                    with open(toc_path, "w", encoding="utf-8") as f:
+                        f.write(str(soup))
+                    print("  " + toc_path)
 
 
 def main():
@@ -204,7 +277,7 @@ def main():
     epub_file = args.filename
     extract_folder = "endnote_fix_temp"
     output_epub = append_fixed_to_filename(epub_file)
-    
+
     # MODIFY TOC ONLY
     if args.toc:
         modify_toc(extract_folder)
